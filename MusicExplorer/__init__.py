@@ -12,7 +12,6 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     # if cached, fetch from redis and then update
     # else, scan and then send
     cached = req.params.get('cached', False)
-    data = find_songs(r)
     if cached:
         # cached_songs = json.loads(r.get('driveMusicList'))
         return func.HttpResponse(
@@ -20,7 +19,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             status_code=200,
             mimetype="application/json"
         )
-
+    data = find_songs(r)
     if data:
         return func.HttpResponse(
             json.dumps({"data": data}),
