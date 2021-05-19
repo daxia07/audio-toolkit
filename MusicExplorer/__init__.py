@@ -1,11 +1,16 @@
 import logging
 import json
 import azure.functions as func
+import os
+import redis
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
     accessToken = ''
+    r = redis.Redis(host=os.environ["REDIS_HOST"], port=os.environ["REDIS_PORT"], password=os.environ["REDIS_PASS"])
+    # creds = json.loads(r.get('creds'))
+    print(r.get("owner"))
     try:
         req_body = req.get_json()
     except ValueError:
