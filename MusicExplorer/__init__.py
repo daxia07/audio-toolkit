@@ -2,25 +2,28 @@ import logging
 import json
 import azure.functions as func
 import os
-import redis
+from redis import Redis
+from .google_driver import find_songs
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
-    accessToken = ''
-    r = redis.Redis(host=os.environ["REDIS_HOST"], port=os.environ["REDIS_PORT"], password=os.environ["REDIS_PASS"])
-    # creds = json.loads(r.get('creds'))
-    print(r.get("owner"))
-    try:
-        req_body = req.get_json()
-    except ValueError:
-        pass
-    else:
-        accessToken = req_body.get('accessToken')
-
-    if accessToken:
+    r = Redis(host=os.environ["REDIS_HOST"], port=os.environ["REDIS_PORT"], password=os.environ["REDIS_PASS"])
+    # if cached, fetch from redis and then update
+    # else, scan and then send
+    cached = req.params.get('cached', False)
+    data = find_songs(r)
+    if cached:
+        # cached_songs = json.loads(r.get('driveMusicList'))
         return func.HttpResponse(
-            json.dumps({"data": f"Access Token received as {accessToken}"}),
+            r.get('driveMusicList'),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    if data:
+        return func.HttpResponse(
+            json.dumps({"data": data}),
             status_code=200,
             mimetype="application/json"
         )
