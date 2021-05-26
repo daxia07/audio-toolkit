@@ -75,6 +75,17 @@ def is_audio(file_path):
     return 'audio' in str(filetype.guess_mime(file_path))
 
 
+def read_file_lines(file, codex='big5'):
+    with open(file, encoding=codex) as rdr:
+        try:
+            lines = rdr.readlines()
+        except UnicodeDecodeError:
+            u_rdr = open(file)
+            lines = u_rdr.readlines()
+            u_rdr.close()
+    return lines
+
+
 def update_cue_file(song_path, song, singer, codex='Big5'):
     # use Big5 to encode Chinese chars
     from pathlib import Path
@@ -89,39 +100,79 @@ def update_cue_file(song_path, song, singer, codex='Big5'):
     if len(target_files) == 0:
         raise ValueError("No target files found")
     _, target_extension = os.path.splitext(os.path.basename(target_files[0]))
-    with open(song_path, encoding=codex) as file:
-        try:
-            lines = file.readlines()
-        except UnicodeDecodeError:
-            print(f"Decoding error for {song}")
-            return
-        with open(os.path.join(album_folder, f'test_{song}'), 'w+') as writer:
-            for line in lines:
-                line = chinese_converter.to_simplified(line)
-                if line.startswith('FILE'):
-                    print(line)
-                    file_line = file_line_regex.search(line).group(1).strip()
-                    file_line = format_name(singer, file_line)
-                    line = 'FILE "' + file_line + '" WAVE\n'
-                writer.write(line)
+    lines = read_file_lines(song_path, codex)
+    with open(os.path.join(album_folder, f'test_{song}'), 'w+') as writer:
+        for line in lines:
+            line = chinese_converter.to_simplified(line)
+            if line.startswith('FILE'):
+                print(line)
+                file_line = file_line_regex.search(line).group(1).strip()
+                file_line = format_name(singer, file_line)
+                line = 'FILE "' + file_line + '" WAVE\n'
+            writer.write(line)
     shutil.move(os.path.join(album_folder, f'test_{song}'), song_path)
-    # os.remove(os.path.join(album_folder, f'test_{song}'))
 
 
-def split_music():
+def convert_cue_files():
     # re-create cue file
     for song_path, singer, album, song in list_songs(include_cue=True):
         if song.endswith('.cue'):
             # modify cue file
             print(song)
             update_cue_file(song_path, song, singer)
+            # should be the only file to decode
+
+
+def split_music(f_path='./music', singer='周杰伦', output='./output'):
+    from deflacue.deflacue import Deflacue
+    from deflacue.exceptions import ParserError
+    from pathlib import Path
+    full_path = os.path.join(f_path, singer)
+    albums = [name for name in os.listdir(full_path) if os.path.isdir(os.path.join(full_path, name))]
+    full_path_abs = Path(full_path).absolute()
+    des_abs_path = Path(output).absolute()
+    tmp_folder = os.path.join(des_abs_path, 'temp')
+    for album in albums:
+        src_abs_path = os.path.join(full_path_abs, album)
+        des_folder = os.path.join(des_abs_path, singer, album)
+        # make temp folder and copy to des
+        # if no cue found, copy files and continue
+        cue_files = [x for x in os.listdir(src_abs_path) if x.endswith('.cue')]
+        if len(cue_files) == 0:
+            print(f'No cue file found for album {album}')
+            if Path(des_folder).is_dir():
+                shutil.rmtree(des_folder)
+            shutil.copytree(src_abs_path, des_folder)
+            continue
+        if Path(tmp_folder).is_dir():
+            # clear up files
+            shutil.rmtree(tmp_folder)
+            os.mkdir(tmp_folder)
+        try:
+            dfc = Deflacue(src_abs_path, dest_path=tmp_folder)
+            dfc.do()
+            # loop over tmp folder to copy files
+            # mv files to output/singer/album
+            Path(des_folder).mkdir(parents=True, exist_ok=True)
+            for subdir, dirs, files in os.walk(tmp_folder):
+                for file in files:
+                    # os.path.join(subdir, file)
+                    file_path = os.path.join(subdir, file)
+                    if is_audio(file_path):
+                        shutil.copy2(file_path, des_folder)
+            # TODO: copy and rename the first image
+        except ParserError as e:
+            print(e)
+            # copy all files to des folder
+            shutil.copytree(src_abs_path, os.path.join(des_abs_path, singer, album))
+            continue
     pass
 
 
 if __name__ == '__main__':
     # rename_folder()
     # rename_files()
-    # list_songs()
-    # add_meta_data()
+    # convert_cue_files()
     split_music()
+    # add_meta_data()
     pass
