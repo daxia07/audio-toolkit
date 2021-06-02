@@ -3,15 +3,20 @@ import re
 import chinese_converter
 import filetype
 import shutil
+from pathlib import Path
+from definitions import CWD
 
 
 def rename_folder(f_path='./music/周杰伦'):
     albums = [name for name in os.listdir(f_path) if os.path.isdir(os.path.join(f_path, name))]
     album_regex = re.compile(r'《(.*)》')
     for album in albums:
-        album_name = album_regex.search(album).group(1).strip()
-        print(f'{album} renaming to {album_name}')
-        os.rename(os.path.join(f_path, album), os.path.join(f_path, album_name))
+        try:
+            album_name = album_regex.search(album).group(1).strip()
+            print(f'{album} renaming to {album_name}')
+            os.rename(os.path.join(f_path, album), os.path.join(f_path, album_name))
+        except AttributeError:
+            continue
 
 
 def rename_files(f_path='./music', singer='周杰伦'):
@@ -52,11 +57,14 @@ def list_songs(f_path='./music', singer='周杰伦', include_cue=False):
 
 def add_meta_data():
     import mutagen
-    for song_path, singer, album, song in list_songs():
+    for song_path, singer, album, song in list_songs(os.path.join(CWD, 'output')):
         print(song)
         file = mutagen.File(song_path)
-        pass
-    pass
+        track_num = file.get('tracknumber', [''])[0]
+        new_name = song.replace(f'{track_num.zfill(2)} - ', '')\
+            .replace(f'{track_num.zfill(2)}.', '')
+        os.rename(os.path.join(song_path),
+                  os.path.join(CWD, 'output', singer, album, new_name))
 
 
 def format_name(singer, name):
@@ -75,20 +83,33 @@ def is_audio(file_path):
     return 'audio' in str(filetype.guess_mime(file_path))
 
 
+def is_image(file_path):
+    return 'image' in str(filetype.guess_mime(file_path))
+
+
 def read_file_lines(file, codex='big5'):
-    with open(file, encoding=codex) as rdr:
+    if codex.lower() == 'big5':
+        codex_list = ['big5', 'gbk', 'utf-8']
+    else:
+        codex_list = [codex]
+    lines = None
+    for encoding in codex_list:
+        f = open(file, encoding=encoding)
         try:
-            lines = rdr.readlines()
+            lines = f.readlines()
+            f.close()
         except UnicodeDecodeError:
-            u_rdr = open(file)
-            lines = u_rdr.readlines()
-            u_rdr.close()
+            f.close()
+            continue
+
+    if lines is None:
+        raise ValueError(f'Unable to decode file: {file}')
+
     return lines
 
 
 def update_cue_file(song_path, song, singer, codex='Big5'):
     # use Big5 to encode Chinese chars
-    from pathlib import Path
     album_folder = Path(song_path).parent.absolute()
     file_line_regex = re.compile(r'FILE "(.*)" WAVE')
     # get extension
@@ -108,6 +129,8 @@ def update_cue_file(song_path, song, singer, codex='Big5'):
                 print(line)
                 file_line = file_line_regex.search(line).group(1).strip()
                 file_line = format_name(singer, file_line)
+                if 'CDImage' in file_line:
+                    file_line = Path(song_path).parent.name + '.' + file_extension
                 line = 'FILE "' + file_line + '" WAVE\n'
             writer.write(line)
     shutil.move(os.path.join(album_folder, f'test_{song}'), song_path)
@@ -123,10 +146,15 @@ def convert_cue_files():
             # should be the only file to decode
 
 
+def rm_tree_if_exist(f_path):
+    if Path(f_path).is_dir():
+        # clear up files
+        shutil.rmtree(f_path)
+
+
 def split_music(f_path='./music', singer='周杰伦', output='./output'):
     from deflacue.deflacue import Deflacue
     from deflacue.exceptions import ParserError
-    from pathlib import Path
     full_path = os.path.join(f_path, singer)
     albums = [name for name in os.listdir(full_path) if os.path.isdir(os.path.join(full_path, name))]
     full_path_abs = Path(full_path).absolute()
@@ -140,14 +168,11 @@ def split_music(f_path='./music', singer='周杰伦', output='./output'):
         cue_files = [x for x in os.listdir(src_abs_path) if x.endswith('.cue')]
         if len(cue_files) == 0:
             print(f'No cue file found for album {album}')
-            if Path(des_folder).is_dir():
-                shutil.rmtree(des_folder)
+            rm_tree_if_exist(des_folder)
             shutil.copytree(src_abs_path, des_folder)
             continue
-        if Path(tmp_folder).is_dir():
-            # clear up files
-            shutil.rmtree(tmp_folder)
-            os.mkdir(tmp_folder)
+        rm_tree_if_exist(tmp_folder)
+        os.mkdir(tmp_folder)
         try:
             dfc = Deflacue(src_abs_path, dest_path=tmp_folder)
             dfc.do()
@@ -160,19 +185,29 @@ def split_music(f_path='./music', singer='周杰伦', output='./output'):
                     file_path = os.path.join(subdir, file)
                     if is_audio(file_path):
                         shutil.copy2(file_path, des_folder)
-            # TODO: copy and rename the first image
+
+            # copy and rename the first image as album
+            for src_file in os.listdir(src_abs_path):
+                if is_image(src_file):
+                    # get extension
+                    _, file_extension = os.path.splitext(src_file)
+                    shutil.copy2(os.path.join(src_abs_path, src_file),
+                                 os.path.join(des_folder, f'{album}{file_extension}'))
+                    break
+
         except ParserError as e:
             print(e)
             # copy all files to des folder
             shutil.copytree(src_abs_path, os.path.join(des_abs_path, singer, album))
             continue
-    pass
+        finally:
+            rm_tree_if_exist(tmp_folder)
 
 
 if __name__ == '__main__':
     # rename_folder()
     # rename_files()
     # convert_cue_files()
-    split_music()
-    # add_meta_data()
+    # split_music()
+    add_meta_data()
     pass

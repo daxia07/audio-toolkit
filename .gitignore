@@ -3,3 +3,4 @@ output/
 music/
 .idea/
 music-player/
+.env
